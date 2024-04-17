@@ -1,25 +1,22 @@
-'''
-Even more importantly, the TradingState will contain a per product overview of all the outstanding buy and sell orders (also called “quotes”) originating from the bots. 
-
-'''
-
 from datamodel import OrderDepth, UserId, TradingState, Order
 from typing import List
 import string
 
 
-class Sample_Trader:
+class Trader:
+
     def run(self, state: TradingState):
+        # Only method required. It takes all buy and sell orders for all symbols as an input, and outputs a list of orders to be sent
         print("traderData: " + state.traderData)
         print("Observations: " + str(state.observations))
-
-        result = list()
-
+        result = {}
         for product in state.order_depths:
             order_depth: OrderDepth = state.order_depths[product]
-            orders: List[Order] = list()
-
-            acceptable_price = 10  # a hardcoded threshold
+            orders: List[Order] = []
+            acceptable_price = 10  # Participant should calculate this value
+            print("Acceptable price : " + str(acceptable_price))
+            print("Buy Order depth : " + str(len(order_depth.buy_orders)) +
+                  ", Sell order depth : " + str(len(order_depth.sell_orders)))
 
             if len(order_depth.sell_orders) != 0:
                 best_ask, best_ask_amount = list(
@@ -29,7 +26,8 @@ class Sample_Trader:
                     orders.append(Order(product, best_ask, -best_ask_amount))
 
             if len(order_depth.buy_orders) != 0:
-                best_bid, best_bid_amount = list(order_depth.items())[0]
+                best_bid, best_bid_amount = list(
+                    order_depth.buy_orders.items())[0]
                 if int(best_bid) > acceptable_price:
                     print("SELL", str(best_bid_amount) + "x", best_bid)
                     orders.append(Order(product, best_bid, -best_bid_amount))
@@ -40,4 +38,4 @@ class Sample_Trader:
         traderData = "SAMPLE"
 
         conversions = 1
-        return result
+        return result, conversions, traderData
