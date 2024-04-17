@@ -6,6 +6,7 @@ import json
 from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
 from typing import Any
 
+
 class Logger:
     def __init__(self) -> None:
         self.logs = ""
@@ -27,7 +28,8 @@ class Logger:
         max_item_length = (self.max_log_length - base_length) // 3
 
         print(self.to_json([
-            self.compress_state(state, self.truncate(state.traderData, max_item_length)),
+            self.compress_state(state, self.truncate(
+                state.traderData, max_item_length)),
             self.compress_orders(orders),
             conversions,
             self.truncate(trader_data, max_item_length),
@@ -51,14 +53,16 @@ class Logger:
     def compress_listings(self, listings: dict[Symbol, Listing]) -> list[list[Any]]:
         compressed = []
         for listing in listings.values():
-            compressed.append([listing["symbol"], listing["product"], listing["denomination"]])
+            compressed.append(
+                [listing["symbol"], listing["product"], listing["denomination"]])
 
         return compressed
 
     def compress_order_depths(self, order_depths: dict[Symbol, OrderDepth]) -> dict[Symbol, list[Any]]:
         compressed = {}
         for symbol, order_depth in order_depths.items():
-            compressed[symbol] = [order_depth.buy_orders, order_depth.sell_orders]
+            compressed[symbol] = [
+                order_depth.buy_orders, order_depth.sell_orders]
 
         return compressed
 
@@ -109,35 +113,37 @@ class Logger:
 
         return value[:max_length - 3] + "..."
 
+
 logger = Logger()
+
 
 class Trader:
 
     def run(self, state: TradingState):
         # Only method required. It takes all buy and sell orders for all symbols as an input, and outputs a list of orders to be sent
-        print("traderData: " + state.traderData)
-        print("Observations: " + str(state.observations))
+        logger.print("traderData: " + state.traderData)
+        logger.print("Observations: " + str(state.observations))
         result = {}
         for product in state.order_depths:
             order_depth: OrderDepth = state.order_depths[product]
             orders: List[Order] = []
             acceptable_price = 10  # Participant should calculate this value
-            print("Acceptable price : " + str(acceptable_price))
-            print("Buy Order depth : " + str(len(order_depth.buy_orders)) +
-                  ", Sell order depth : " + str(len(order_depth.sell_orders)))
+            logger.print("Acceptable price : " + str(acceptable_price))
+            logger.print("Buy Order depth : " + str(len(order_depth.buy_orders)) +
+                         ", Sell order depth : " + str(len(order_depth.sell_orders)))
 
             if len(order_depth.sell_orders) != 0:
                 best_ask, best_ask_amount = list(
                     order_depth.sell_orders.items())[0]
                 if int(best_ask) < acceptable_price:
-                    print("BUY", str(-best_ask_amount) + "x", best_ask)
+                    logger.print("BUY", str(-best_ask_amount) + "x", best_ask)
                     orders.append(Order(product, best_ask, -best_ask_amount))
 
             if len(order_depth.buy_orders) != 0:
                 best_bid, best_bid_amount = list(
                     order_depth.buy_orders.items())[0]
                 if int(best_bid) > acceptable_price:
-                    print("SELL", str(best_bid_amount) + "x", best_bid)
+                    logger.print("SELL", str(best_bid_amount) + "x", best_bid)
                     orders.append(Order(product, best_bid, -best_bid_amount))
 
             result[product] = orders
