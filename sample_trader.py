@@ -40,4 +40,4 @@ class Sample_Trader:
         traderData = "SAMPLE"
 
         conversions = 1
-        return result, conversions, traderData
+        return result
