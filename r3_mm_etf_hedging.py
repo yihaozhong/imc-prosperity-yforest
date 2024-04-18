@@ -120,14 +120,17 @@ logger = Logger()
 class Trader:
     def __init__(self):
         self.position_limits = {
-            'CHOCOLATE': 500,
-            'STRAWBERRIES': 600,
-            'ROSES': 250,
-            'GIFT_BASKET': 200
+            'CHOCOLATE': 250,
+            'STRAWBERRIES': 350,
+            'ROSES': 60,
+            'GIFT_BASKET': 60,
+            'ORCHIDS': 100,
+            'STARFRUIT': 20,
+            'AMETHYSTS': 20
         }
 
     def calculate_fair_value(self, product_prices):
-        return 4 * product_prices['CHOCOLATE'] + 6 * product_prices['STRAWBERRIES'] + product_prices['ROSES']
+        return int(4 * product_prices['CHOCOLATE'] + 6 * product_prices['STRAWBERRIES'] + product_prices['ROSES'] + 380)
 
     def run(self, state: TradingState):
         logger.print("traderData: " + state.traderData)
@@ -136,11 +139,9 @@ class Trader:
         result = {}
         product_prices = {}
 
-        target_symbols = ['CHOCOLATE', 'STRAWBERRIES', 'ROSES', 'GIFT_BASKET']
+        target_symbols = ['CHOCOLATE', 'STRAWBERRIES', 'ROSES']
 
         for product in target_symbols:
-            if product == 'GIFT_BASKET':
-                continue
 
             order_depth: OrderDepth = state.order_depths[product]
 
@@ -154,7 +155,7 @@ class Trader:
 
         net_position = 0
 
-        for product in target_symbols:
+        for product in state.order_depths:
             position_limit = self.position_limits[product]
             order_depth: OrderDepth = state.order_depths[product]
             orders: List[Order] = []
@@ -164,43 +165,109 @@ class Trader:
 
             current_inventory = state.position.get(product, 0)
 
-            if product != 'GIFT_BASKET':
-                net_position += current_inventory
+            if product == 'AMETHYSTS':
+                best_ask = min(order_depth.sell_orders.keys())
+                best_bid = max(order_depth.buy_orders.keys())
+                mid_price = (best_ask + best_bid) / 2
 
+                position = state.position.get(product, 0)
+                position_limit = self.position_limits[product]
+
+                if position > 0.5 * position_limit:
+                    ask_price = mid_price + 1
+                    ask_size = min(10, position_limit - position)
+                    if ask_size > 0:
+                        orders.append(Order(product, best_ask, -ask_size))
+                elif position < -0.5 * position_limit:
+                    bid_price = mid_price - 1
+                    bid_size = min(10, position_limit + position)
+                    if bid_size > 0:
+                        orders.append(Order(product, best_bid, bid_size))
+                else:
+                    ask_price = mid_price + 2
+                    bid_price = mid_price - 2
+                    ask_size = bid_size = 10
+                    orders.append(Order(product, best_ask, -ask_size))
+                    orders.append(Order(product, best_bid, bid_size))
+
+            elif product != 'GIFT_BASKET':
+                # Calculate the current inventory
+                current_inventory = state.position.get(product, 0)
+                net_position += current_inventory
+                inventory_factor = current_inventory / position_limit
+
+                # Calculate mid-price
                 best_ask_price = min(order_depth.sell_orders.keys())
                 best_bid_price = max(order_depth.buy_orders.keys())
-
-                bid_size = min(10, position_limit - current_inventory)
-                ask_size = min(10, position_limit + current_inventory)
-
-                if bid_size > 0:
-                    orders.append(Order(product, best_bid_price, bid_size))
-                if ask_size > 0:
-                    orders.append(Order(product, best_ask_price, -ask_size))
-
-            else:
-                if fair_value is None:
-                    continue
-
-                best_ask_price, best_ask_amount = min(
-                    order_depth.sell_orders.items())
-                best_bid_price, best_bid_amount = max(
-                    order_depth.buy_orders.items())
                 mid_price = (best_ask_price + best_bid_price) / 2
 
-                if mid_price < fair_value:
-                    hedge_size = min(-net_position, best_ask_amount,
-                                     position_limit - current_inventory)
-                    if hedge_size > 0:
-                        orders.append(
-                            Order(product, best_ask_price, hedge_size))
+                # Calculate order book imbalance
+                total_bid_volume = sum(order_depth.buy_orders.values())
+                total_ask_volume = sum(order_depth.sell_orders.values())
+                book_imbalance = 0  # Default value in case of no volume
+                if total_bid_volume + total_ask_volume > 0:
+                    book_imbalance = (total_bid_volume - total_ask_volume) / \
+                        (total_bid_volume + total_ask_volume)
 
-                elif mid_price > fair_value:
-                    hedge_size = min(net_position, best_bid_amount,
+                # Incorporate inventory factor and order book imbalance into spread calculation
+                target_spread = mid_price * \
+                    (0.0001 + 0.0001 * inventory_factor - 0.0005 * book_imbalance)
+                bid_price = mid_price - target_spread
+                ask_price = mid_price + target_spread
+
+                logger.print("Buy Order depth : " + str(len(order_depth.buy_orders)) +
+                             ", Sell order depth : " + str(len(order_depth.sell_orders)))
+
+                if len(order_depth.sell_orders) != 0:
+                    best_ask, best_ask_amount = list(
+                        order_depth.sell_orders.items())[0]
+
+                    ask_size = min(position_limit -
+                                   current_inventory, best_ask_amount)
+                    if ask_price > best_ask:
+                        # logger.print("BUY", str(ask_size) + "x", best_ask)
+                        orders.append(
+                            Order(product, best_ask, ask_size))
+
+                if len(order_depth.buy_orders) != 0:
+                    best_bid, best_bid_amount = list(
+                        order_depth.buy_orders.items())[0]
+
+                    bid_size = max(1, min(current_inventory +
+                                          position_limit, best_bid_amount))
+
+                    if bid_price > best_bid_price:
+                        # logger.print("SELL", str(bid_size) + "x", best_bid)
+                        orders.append(
+                            Order(product, best_bid, bid_size))
+
+            else:
+                logger.print("fair_value: ", fair_value)
+                logger.print("net_position: ", net_position)
+                best_ask, best_ask_amount = list(
+                    order_depth.sell_orders.items())[0]
+                best_bid, best_bid_amount = list(
+                    order_depth.buy_orders.items())[0]
+                mid_price = (best_ask + best_bid) / 2
+
+                # trade against fair value only, do not need to consider net position, use all available capital
+
+                if net_position > 0:
+
+                    hedge_size = min(
+                        net_position, position_limit - current_inventory)
+                    if hedge_size > 0:
+
+                        orders.append(
+                            Order(product, best_ask, -hedge_size))
+                elif net_position < 0:
+                    # If net position is negative, we want to buy the GIFT_BASKET
+                    hedge_size = min(-net_position,
                                      position_limit + current_inventory)
                     if hedge_size > 0:
+
                         orders.append(
-                            Order(product, best_bid_price, -hedge_size))
+                            Order(product, best_bid, hedge_size))
 
             result[product] = orders
 
