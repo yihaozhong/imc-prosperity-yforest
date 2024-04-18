@@ -124,8 +124,11 @@ class Trader:
         logger.print("traderData: " + state.traderData)
         logger.print("Observations: " + str(state.observations))
         result = {}
+
         for product in state.order_depths:
             order_depth: OrderDepth = state.order_depths[product]
+            if not order_depth:
+                continue
             orders: List[Order] = []
             acceptable_price = 10  # Participant should calculate this value
             logger.print("Acceptable price : " + str(acceptable_price))
@@ -144,7 +147,7 @@ class Trader:
                     order_depth.buy_orders.items())[0]
                 if int(best_bid) > acceptable_price:
                     logger.print("SELL", str(best_bid_amount) + "x", best_bid)
-                    orders.append(Order(product, best_bid, -best_bid_amount))
+                    orders.append(Order(product, best_bid, best_bid_amount))
 
             result[product] = orders
 

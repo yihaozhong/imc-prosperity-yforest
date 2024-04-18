@@ -134,12 +134,17 @@ class Trader:
         logger.print("traderData: " + state.traderData)
         logger.print("Observations: " + str(state.observations))
         result = {}
-        for product, position_limit in self.position_limits.items():
+        for product in state.order_depths:
+            position_limit = self.position_limits[product]
             order_depth: OrderDepth = state.order_depths[product]
             orders: List[Order] = []
 
+            if not order_depth:
+                continue
+
             # Calculate the current inventory
             current_inventory = state.position.get(product, 0)
+            inventory_factor = current_inventory / position_limit
 
             # Calculate mid-price
             best_ask_price = min(order_depth.sell_orders.keys())
@@ -156,31 +161,33 @@ class Trader:
 
             # Incorporate inventory factor and order book imbalance into spread calculation
             target_spread = mid_price * \
-                (0.0001 + 0.0001 * inventory_factor - 0.00005 * book_imbalance)
+                (0.001 + 0.001 * inventory_factor - 0.0005 * book_imbalance)
             bid_price = mid_price - target_spread
             ask_price = mid_price + target_spread
 
             logger.print("Buy Order depth : " + str(len(order_depth.buy_orders)) +
                          ", Sell order depth : " + str(len(order_depth.sell_orders)))
 
-            bid_size = max(
-                1, min(position_limit - current_inventory, total_bid_volume // 10))
-            ask_size = max(1, min(current_inventory +
-                           position_limit, total_ask_volume // 10))
-
             if len(order_depth.sell_orders) != 0:
                 best_ask, best_ask_amount = list(
                     order_depth.sell_orders.items())[0]
-                if ask_price < best_ask:
-                    logger.print("BUY", str(-best_ask_amount) + "x", best_ask)
-                    orders.append(Order(product, best_ask, -best_ask_amount))
+
+                ask_size = max(
+                    1, min(position_limit - current_inventory, best_ask_amount//10))
+                if ask_price > best_ask:
+                    logger.print("BUY", str(ask_size) + "x", best_ask)
+                    orders.append(Order(product, best_ask, best_ask_amount))
 
             if len(order_depth.buy_orders) != 0:
                 best_bid, best_bid_amount = list(
                     order_depth.buy_orders.items())[0]
+
+                bid_size = max(1, min(current_inventory +
+                                      position_limit, best_bid_amount//10))
+
                 if bid_price > best_bid_price:
-                    logger.print("SELL", str(best_bid_amount) + "x", best_bid)
-                    orders.append(Order(product, best_bid, -best_bid_amount))
+                    logger.print("SELL", str(bid_size) + "x", best_bid)
+                    orders.append(Order(product, best_bid, best_bid_amount))
 
             result[product] = orders
 
