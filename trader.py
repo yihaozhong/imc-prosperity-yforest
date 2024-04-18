@@ -118,31 +118,67 @@ logger = Logger()
 
 
 class Trader:
+    def __init__(self):
+        self.position_limits = {
+            'CHOCOLATE': 250,
+            'STRAWBERRIES': 350,
+            'ROSES': 60,
+            'GIFT_BASKET': 60,
+            'ORCHIDS': 100,
+            'STARFRUIT': 20,
+            'AMETHYSTS': 20
+        }
 
     def run(self, state: TradingState):
         # Only method required. It takes all buy and sell orders for all symbols as an input, and outputs a list of orders to be sent
         logger.print("traderData: " + state.traderData)
         logger.print("Observations: " + str(state.observations))
         result = {}
-        for product in state.order_depths:
+        for product, position_limit in self.position_limits.items():
             order_depth: OrderDepth = state.order_depths[product]
             orders: List[Order] = []
-            acceptable_price = 10  # Participant should calculate this value
-            logger.print("Acceptable price : " + str(acceptable_price))
+
+            # Calculate the current inventory
+            current_inventory = state.position.get(product, 0)
+
+            # Calculate mid-price
+            best_ask_price = min(order_depth.sell_orders.keys())
+            best_bid_price = max(order_depth.buy_orders.keys())
+            mid_price = (best_ask_price + best_bid_price) / 2
+
+            # Calculate order book imbalance
+            total_bid_volume = sum(order_depth.buy_orders.values())
+            total_ask_volume = sum(order_depth.sell_orders.values())
+            book_imbalance = 0  # Default value in case of no volume
+            if total_bid_volume + total_ask_volume > 0:
+                book_imbalance = (total_bid_volume - total_ask_volume) / \
+                    (total_bid_volume + total_ask_volume)
+
+            # Incorporate inventory factor and order book imbalance into spread calculation
+            target_spread = mid_price * \
+                (0.0001 + 0.0001 * inventory_factor - 0.00005 * book_imbalance)
+            bid_price = mid_price - target_spread
+            ask_price = mid_price + target_spread
+
             logger.print("Buy Order depth : " + str(len(order_depth.buy_orders)) +
                          ", Sell order depth : " + str(len(order_depth.sell_orders)))
+
+            bid_size = max(
+                1, min(position_limit - current_inventory, total_bid_volume // 10))
+            ask_size = max(1, min(current_inventory +
+                           position_limit, total_ask_volume // 10))
 
             if len(order_depth.sell_orders) != 0:
                 best_ask, best_ask_amount = list(
                     order_depth.sell_orders.items())[0]
-                if int(best_ask) < acceptable_price:
+                if ask_price < best_ask:
                     logger.print("BUY", str(-best_ask_amount) + "x", best_ask)
                     orders.append(Order(product, best_ask, -best_ask_amount))
 
             if len(order_depth.buy_orders) != 0:
                 best_bid, best_bid_amount = list(
                     order_depth.buy_orders.items())[0]
-                if int(best_bid) > acceptable_price:
+                if bid_price > best_bid_price:
                     logger.print("SELL", str(best_bid_amount) + "x", best_bid)
                     orders.append(Order(product, best_bid, -best_bid_amount))
 
