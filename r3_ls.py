@@ -173,7 +173,7 @@ class Trader:
                     order_depth.sell_orders.items())[0]
 
                 ask_size = max(
-                    1, min(position_limit - current_inventory, best_ask_amount//10))
+                    1, min(position_limit - current_inventory, best_ask_amount))
                 if ask_price > best_ask:
                     logger.print("BUY", str(ask_size) + "x", best_ask)
                     orders.append(Order(product, best_ask, best_ask_amount))
@@ -183,7 +183,7 @@ class Trader:
                     order_depth.buy_orders.items())[0]
 
                 bid_size = max(1, min(current_inventory +
-                                      position_limit, best_bid_amount//10))
+                                      position_limit, best_bid_amount))
 
                 if bid_price > best_bid_price:
                     logger.print("SELL", str(bid_size) + "x", best_bid)
