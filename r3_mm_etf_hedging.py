@@ -119,6 +119,8 @@ logger = Logger()
 
 class Trader:
     def __init__(self):
+        self.humidity_history = []
+        self.sunlight_history = []
         self.position_limits = {
             'CHOCOLATE': 250,
             'STRAWBERRIES': 350,
@@ -129,8 +131,39 @@ class Trader:
             'AMETHYSTS': 20
         }
 
+    def compute_mid_price(self, sell_orders, buy_orders):
+        if sell_orders and buy_orders:
+            best_ask_price = min(sell_orders)
+            best_bid_price = max(buy_orders)
+            return (best_ask_price + best_bid_price) / 2
+        else:
+            return None
+
     def calculate_fair_value(self, product_prices):
-        return int(4 * product_prices['CHOCOLATE'] + 6 * product_prices['STRAWBERRIES'] + product_prices['ROSES'] + 380)
+        return int(4 * product_prices['CHOCOLATE'] + 6 * product_prices['STRAWBERRIES'] + product_prices['ROSES'] + 375)
+
+    def calculate_sunlight_hours(self, rate, timestamp):
+        timestep = 12.0 / 10000.0
+        hours_passed = timestamp * timestep
+        remaining_hours = 12 - hours_passed
+        total_sunlight_estimate = rate * hours_passed + rate * remaining_hours
+        return total_sunlight_estimate
+
+    def analyse_humidity(self, humidity):
+        self.humidity_history.append(humidity)
+
+        if len(self.humidity_history) < 2:
+            return 'hold'
+
+        # Compare the last two humidity readings
+        recent_change = self.humidity_history[-1] - self.humidity_history[-2]
+
+        if 60 <= humidity <= 80:
+            return 'hold'
+        elif humidity > 80:
+            return 'long' if recent_change > 0 else 'short'
+        elif humidity < 60:
+            return 'long' if recent_change < 0 else 'short'
 
     def run(self, state: TradingState):
         logger.print("traderData: " + state.traderData)
@@ -154,6 +187,12 @@ class Trader:
         fair_value = self.calculate_fair_value(product_prices)
 
         net_position = 0
+        mid_prices = {}
+        components = ['CHOCOLATE', 'STRAWBERRIES', 'ROSES']
+        for comp in components:
+            order_depth: OrderDepth = state.order_depths[product]
+            mid_prices[comp] = self.compute_mid_price(
+                order_depth.sell_orders, order_depth.buy_orders)
 
         for product in state.order_depths:
             position_limit = self.position_limits[product]
@@ -174,21 +213,66 @@ class Trader:
                 position_limit = self.position_limits[product]
 
                 if position > 0.5 * position_limit:
-                    ask_price = mid_price + 1
-                    ask_size = min(10, position_limit - position)
+                    ask_price = int(mid_price + 1)
+                    ask_size = int(min(10, position_limit - position))
                     if ask_size > 0:
-                        orders.append(Order(product, best_ask, -ask_size))
+                        orders.append(Order(product, ask_price, -ask_size))
                 elif position < -0.5 * position_limit:
-                    bid_price = mid_price - 1
-                    bid_size = min(10, position_limit + position)
+                    bid_price = int(mid_price - 1)
+                    bid_size = int(min(10, position_limit + position))
                     if bid_size > 0:
-                        orders.append(Order(product, best_bid, bid_size))
+                        orders.append(Order(product, bid_price, bid_size))
                 else:
-                    ask_price = mid_price + 2
-                    bid_price = mid_price - 2
+                    ask_price = int(mid_price + 2)
+                    bid_price = int(mid_price - 2)
                     ask_size = bid_size = 10
-                    orders.append(Order(product, best_ask, -ask_size))
-                    orders.append(Order(product, best_bid, bid_size))
+                    orders.append(Order(product, ask_price, -ask_size))
+                    orders.append(Order(product, bid_price, bid_size))
+
+            elif product == 'ORCHIDS':
+                current_sunlight = state.observations.conversionObservations["ORCHIDS"].sunlight
+                current_humidity = state.observations.conversionObservations["ORCHIDS"].humidity
+
+                # Determine trade action based on sunlight
+                sunlight_hours = self.calculate_sunlight_hours(
+                    current_sunlight, state.timestamp)
+                # 2500 is your average sunlight per hour threshold
+                sunlight_action = 'short' if sunlight_hours < 7 * 2500 else 'hold'
+
+                # Determine trade action based on humidity
+                humidity_action = self.analyse_humidity(current_humidity)
+
+                # Combine actions from sunlight and humidity analysis
+                if sunlight_action == 'short' or humidity_action == 'short':
+                    trade_action = 'short'
+                elif sunlight_action == 'long' or humidity_action == 'long':
+                    trade_action = 'long'
+                else:
+                    trade_action = 'hold'
+
+                # log sunlight and humidity analysis, and trade action
+                logger.print("Sunlight: ", sunlight_action)
+                logger.print("Humidity: ", humidity_action)
+                logger.print("Trade action: ", trade_action)
+
+                if trade_action != 'hold':
+
+                    if trade_action == 'short':
+
+                        best_bid = max(order_depth.buy_orders.keys())
+                        bid_size = min(
+                            5, position_limit + current_inventory)
+                        if bid_size > 0:
+                            orders.append(
+                                Order(product, best_bid, bid_size))
+                    elif trade_action == 'long':
+
+                        best_ask = min(order_depth.sell_orders.keys())
+                        ask_size = min(
+                            5, position_limit - current_inventory)
+                        if ask_size > 0:
+                            orders.append(
+                                Order(product, best_ask, -ask_size))
 
             elif product != 'GIFT_BASKET':
                 # Calculate the current inventory
@@ -241,33 +325,70 @@ class Trader:
                         orders.append(
                             Order(product, best_bid, bid_size))
 
-            else:
+            elif product == 'GIFT_BASKET':
                 logger.print("fair_value: ", fair_value)
                 logger.print("net_position: ", net_position)
                 best_ask, best_ask_amount = list(
                     order_depth.sell_orders.items())[0]
                 best_bid, best_bid_amount = list(
                     order_depth.buy_orders.items())[0]
-                mid_price = (best_ask + best_bid) / 2
+                gift_mid_price = (best_ask + best_bid) / 2
 
-                # trade against fair value only, do not need to consider net position, use all available capital
+                mid_prices['GIFT_BASKET'] = gift_mid_price
+               # if net_position > 0:
 
-                if net_position > 0:
+               #     hedge_size = min(
+               #         net_position, position_limit - current_inventory)
+               #     if hedge_size > 0:
 
-                    hedge_size = min(
-                        net_position, position_limit - current_inventory)
-                    if hedge_size > 0:
+               #         orders.append(
+               #             Order(product, best_ask, -hedge_size))
+               # elif net_position < 0:
+               #     # If net position is negative, we want to buy the GIFT_BASKET
+               #     hedge_size = min(-net_position,
+               #                      position_limit + current_inventory)
+               #     if hedge_size > 0:
 
-                        orders.append(
-                            Order(product, best_ask, -hedge_size))
-                elif net_position < 0:
-                    # If net position is negative, we want to buy the GIFT_BASKET
-                    hedge_size = min(-net_position,
-                                     position_limit + current_inventory)
-                    if hedge_size > 0:
+               #         orders.append(
+               #             Order(product, best_bid, hedge_size))
+                # if mid_prices['GIFT_BASKET'] > fair_value:
+                #     # The GIFT_BASKET is overvalued, so we should consider selling
+                #     size_to_sell = min(
+                #         -order_depth.sell_orders[min(order_depth.sell_orders)],
+                #         self.position_limits['GIFT_BASKET'] -
+                #         position_limit
+                #     )
+                #     if size_to_sell > 0:
+                #         orders.append(Order('GIFT_BASKET', min(
+                #             order_depth.sell_orders), -size_to_sell))
+                # elif mid_prices['GIFT_BASKET'] < fair_value:
+                #     # The GIFT_BASKET is undervalued
+                #     size_to_buy = min(
+                #         order_depth.buy_orders[max(
+                #             order_depth.buy_orders)],
+                #         self.position_limits['GIFT_BASKET'] +
+                #         position_limit
+                #     )
+                #     if size_to_buy > 0:
+                #         orders.append(Order('GIFT_BASKET', max(
+                #             order_depth.buy_orders), size_to_buy))
+                self.sunlight_history.append(
+                    state.observations.conversionObservations["ORCHIDS"].sunlight)
 
-                        orders.append(
-                            Order(product, best_bid, hedge_size))
+                recent_change = 0
+                if len(self.sunlight_history) > 1:
+                    recent_change = self.sunlight_history[-1] - \
+                        self.sunlight_history[-2]
+
+                if recent_change > 0:
+                    # place best price buy order
+                    orders.append(
+                        Order('GIFT_BASKET', best_bid, best_bid_amount))
+
+                elif recent_change < 0:
+                    # place best price sell order
+                    orders.append(
+                        Order('GIFT_BASKET', best_ask, -best_ask_amount))
 
             result[product] = orders
 
