@@ -158,9 +158,9 @@ class Trader:
         # Compare the last two humidity readings
         recent_change = self.humidity_history[-1] - self.humidity_history[-2]
 
-        if 60 <= humidity <= 80:
+        if 60 <= humidity <= 75:
             return 'hold'
-        elif humidity > 80:
+        elif humidity > 75:
             return 'long' if recent_change > 0 else 'short'
         elif humidity < 60:
             return 'long' if recent_change < 0 else 'short'
@@ -260,19 +260,18 @@ class Trader:
                     if trade_action == 'short':
 
                         best_bid = max(order_depth.buy_orders.keys())
-                        bid_size = min(
-                            5, position_limit + current_inventory)
+
                         if bid_size > 0:
                             orders.append(
-                                Order(product, best_bid, bid_size))
+                                Order(product, best_bid, 2))
                     elif trade_action == 'long':
 
                         best_ask = min(order_depth.sell_orders.keys())
                         ask_size = min(
-                            5, position_limit - current_inventory)
+                            1, position_limit - current_inventory)
                         if ask_size > 0:
                             orders.append(
-                                Order(product, best_ask, -ask_size))
+                                Order(product, best_ask, -2))
 
             elif product != 'GIFT_BASKET':
                 # Calculate the current inventory
